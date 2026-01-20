@@ -1,0 +1,12 @@
+.env
+.env.example
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.streamlit/secrets.toml
+posted_keywords.txt
+posted_titles.txt
