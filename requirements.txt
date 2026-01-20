@@ -1,0 +1,8 @@
+pytrends
+python-wordpress-xmlrpc
+requests
+python-dotenv
+beautifulsoup4
+lxml
+streamlit
+pandas

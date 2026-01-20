@@ -3,17 +3,49 @@ import pandas as pd
 import os
 import sys
 import random
+import json
+import datetime
 
 # Ensure import works
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from auto_blog import trends, content, wordpress, images
 from auto_blog.main import HISTORY_FILE
+from auto_blog.config import WP_USERNAME, WP_PASSWORD
 
 st.set_page_config(page_title="Auto-Blog Pro", page_icon="🚀", layout="wide")
 
+# --- AUTHENTICATION ---
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    # If already verified, skip
+    if st.session_state.get("password_correct", False):
+        return True
+
+    st.header("🔒 Login Required")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        username = st.text_input("Username")
+    with col2:
+        password = st.text_input("Password", type="password")
+
+    if st.button("Log In"):
+        # Check against Config/Env variables
+        if username == WP_USERNAME and password == WP_PASSWORD:
+            st.session_state["password_correct"] = True
+            st.rerun()
+        else:
+            st.error("😕 User not known or password incorrect")
+    return False
+
+if not check_password():
+    st.stop()  # Stop execution if not logged in
+
+# --- APP LOGIC ---
+
 # Session State Initialization
 if 'step' not in st.session_state:
-    st.session_state.step = 1 # 1=Research, 2=Select Titles, 3=Publish
+    st.session_state.step = 1 # 1=Research, 2=Select Titles, 3=Publish, 4=Dashboard
 if 'keywords' not in st.session_state:
     st.session_state.keywords = []
 if 'selected_keywords' not in st.session_state:
@@ -33,11 +65,65 @@ if 'niche_input' not in st.session_state:
 if 'sub_niche' not in st.session_state:
     st.session_state.sub_niche = ""
 
+# Sidebar Navigation
+with st.sidebar:
+    st.header("Navigation")
+    if st.button("📊 Dashboard", key="nav_dash"): st.session_state.step = 4
+    if st.button("🔍 Step 1: Research", key="nav_one"): st.session_state.step = 1
+    if st.button("📝 Step 2: Ideation", key="nav_two"): st.session_state.step = 2
+    if st.button("🏭 Step 3: Mass Auto", key="nav_three"): st.session_state.step = 3
+    st.markdown("---")
+    if st.button("Log Out"):
+        st.session_state["password_correct"] = False
+        st.session_state.clear()
+        st.rerun()
 
 st.title("🚀 Auto-Blog Ultra")
 
+# --- STEP 4: DASHBOARD ---
+if st.session_state.step == 4:
+    st.header("📊 Activity Dashboard")
+    
+    # Load JSON History
+    history_data = []
+    if os.path.exists("post_history.json"):
+        with open("post_history.json", "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    history_data.append(json.loads(line))
+                except: pass
+    
+    if not history_data:
+        st.info("No activity logged yet. Start publishing to see stats here!")
+    else:
+        # Summary Metrics
+        total_posts = len(history_data)
+        st.metric("Total Published Posts", total_posts)
+        
+        # Detailed Table
+        st.subheader("Recent Activity Log")
+        
+        # Flatten validation stats for table display
+        table_rows = []
+        for entry in history_data:
+            row = {
+                "Date": entry.get("timestamp", ""),
+                "Title": entry.get("title", ""),
+                "Status": entry.get("status", "Unknown"),
+            }
+            # Add validation flags
+            validations = entry.get("validations", {})
+            row["Word Count"] = "✅" if validations.get("Word Count > 1500", False) else "❌"
+            row["FAQ"] = "✅" if validations.get("FAQ Section", False) else "❌"
+            row["SEO Meta"] = "✅" if validations.get("SEO Meta", False) else "-"
+            table_rows.append(row)
+            
+        df_history = pd.DataFrame(table_rows)
+        st.dataframe(df_history, use_container_width=True)
+
+
 # --- STEP 1: DEEP RESEARCH ---
-if st.session_state.step == 1:
+elif st.session_state.step == 1:
     st.header("Step 1: Advanced Research & Analysis")
     
     # 1. Niche Suggestions
@@ -202,7 +288,12 @@ elif st.session_state.step == 3:
         # 1. Fetch Internal Links Index (Once at start)
         status_container.info("Indexing existing posts for internal linking...")
         all_posts_index = wordpress.get_all_posts(client)
-        st.write(f"Indexed {len(all_posts_index)} existing posts for linking.")
+        
+        # SYNC HISTORY: Add all existing WP titles to history to prevent duplicates after reload
+        for p in all_posts_index:
+            posted_titles.add(p['title'])
+            
+        st.write(f"Indexed {len(all_posts_index)} existing posts. History synced.")
         
         progress_bar = st.progress(0)
         posts_published = 0
@@ -248,7 +339,9 @@ elif st.session_state.step == 3:
                 
                 # VALIDATION CHECKS (Visual Feedback)
                 checks = content.validate_post_structure(post_data)
+                validation_results = {c[0]: c[1] for c in checks} # Store for logs
                 all_passed = True
+                
                 with st.expander(f"✅ Validation Checks for: {title}", expanded=False): # Collapsed to save space in mass mode
                     for name, passed, details in checks:
                         if passed:
@@ -265,6 +358,7 @@ elif st.session_state.step == 3:
                 if post_data.get('meta_title'):
                     custom_fields.append({'key': '_yoast_wpseo_title', 'value': post_data['meta_title']})
                     custom_fields.append({'key': 'rank_math_title', 'value': post_data['meta_title']})
+                    validation_results["SEO Meta"] = True
                 if post_data.get('meta_desc'):
                     custom_fields.append({'key': '_yoast_wpseo_metadesc', 'value': post_data['meta_desc']})
                     custom_fields.append({'key': 'rank_math_description', 'value': post_data['meta_desc']})
@@ -302,10 +396,22 @@ elif st.session_state.step == 3:
                 try:
                     wordpress.create_wp_post(client, post_data['title'], final_content, post_data['tags'], featured_id, [st.session_state.niche], custom_fields=custom_fields)
                     
-                    # Update History
+                    # Update History (TXT)
                     with open("posted_titles.txt", "a", encoding="utf-8") as f:
                         f.write(title + "\n")
                     posted_titles.add(title)
+                    
+                    # Update History (JSON LOG)
+                    log_entry = {
+                        "title": title,
+                        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "Published",
+                        "validations": validation_results,
+                        "images": len(uploaded_imgs),
+                        "seo_meta": bool(custom_fields)
+                    }
+                    with open("post_history.json", "a", encoding="utf-8") as f:
+                        f.write(json.dumps(log_entry) + "\n")
                     
                     # Update Link Index
                     all_posts_index.append({'title': title, 'link': '#'}) # URL Unknown until fetch, placeholder
@@ -326,8 +432,3 @@ elif st.session_state.step == 3:
                 
         st.balloons()
         st.success("Mass Generation Complete!")
-
-st.sidebar.markdown("---")
-if st.sidebar.button("Reset App"):
-    st.session_state.clear()
-    st.rerun()
