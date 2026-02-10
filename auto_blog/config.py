@@ -9,7 +9,7 @@ TRENDS_HL = 'en-US'  # Host Language
 
 # LLM (OpenRouter)
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
-GEMINI_MODEL = "xiaomi/mimo-v2-flash:free"
+GEMINI_MODEL = "google/gemini-3-flash-preview"
 SITE_URL = "http://localhost:8501"
 SITE_NAME = "Auto-Blog Pro"
 
@@ -20,3 +20,4 @@ WP_PASSWORD = os.getenv('WP_PASSWORD')  # Application Password
 
 # Pexels (Image)
 PEXELS_API_KEY = os.getenv('PEXELS_API_KEY')
+
